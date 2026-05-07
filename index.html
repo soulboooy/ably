@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>💕 双人实时同步测试 (Ably)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; touch-action: manipulation; }
+        .btn-click { transition: transform 0.1s, background-color 0.1s; }
+        .btn-click:active { transform: scale(0.9); background-color: #f59e0b; }
+        .log-item { animation: fadeIn 0.25s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-pink-50 to-blue-50 min-h-screen flex items-center justify-center p-4">
+    <div class="w-full max-w-md bg-white/90 backdrop-blur rounded-2xl shadow-xl overflow-hidden border border-white/50">
+        <!-- 登录页 -->
+        <div id="login-view" class="p-8 text-center space-y-6">
+            <div class="text-5xl">📡</div>
+            <h1 class="text-2xl font-bold text-gray-800">双人实时同步测试</h1>
+            <p class="text-sm text-gray-500">输入相同房间号，点击按钮实时同步</p>
+            <input type="text" id="room-input" placeholder="房间号 (如: love)"
+                class="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-center font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-pink-400">
+            <button onclick="joinRoom()" class="w-full py-3 bg-gradient-to-r from-pink-500 to-rose-500 text-white font-bold rounded-xl shadow-md hover:shadow-lg active:scale-[0.98] transition">🔗 进入房间</button>
+            <p id="status" class="text-xs text-red-500 h-4"></p>
+        </div>
+
+        <!-- 游戏页 -->
+        <div id="game-view" class="hidden flex flex-col h-[500px]">
+            <div class="px-6 py-4 bg-white/70 border-b flex justify-between items-center">
+                <span class="font-mono text-pink-600 font-bold" id="room-display">-</span>
+                <span class="text-xs text-green-600 flex items-center gap-1"><span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> 已连接</span>
+            </div>
+            <div class="flex-1 flex flex-col items-center justify-center p-6 space-y-6">
+                <div id="logs" class="w-full h-32 overflow-y-auto bg-gray-50 rounded-lg p-3 text-sm space-y-1 border border-gray-100">
+                    <div class="text-gray-400 text-center italic">等待互动...</div>
+                </div>
+                <button id="click-btn" onclick="sendClick()" class="btn-click w-24 h-24 bg-yellow-400 rounded-full shadow-lg flex items-center justify-center text-3xl border-4 border-white hover:bg-yellow-300">👆</button>
+                <p class="text-gray-500 text-sm">点击这里，对方会立刻看到</p>
+            </div>
+            <div class="p-4 border-t bg-white/80">
+                <button onclick="leaveRoom()" class="w-full py-2 text-gray-400 hover:text-red-500 text-sm transition">断开连接</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ================= 配置区域 =================
+        // ⚠️ 务必将下方的 'YOUR_ABLY_KEY' 替换为你复制的 Ably Root Key
+        const ABLY_KEY = 'Zcg8Rw.v6JlkA:yJwtWNWSGIReNg_wGN6KxUcRPDiDJZilJzREwjbv_X0'; 
+        // ===========================================
+
+        let ably = null;
+        let channel = null;
+        const myId = 'user_' + Math.random().toString(36).substr(2, 6);
+
+        const ui = {
+            loginView: document.getElementById('login-view'),
+            gameView: document.getElementById('game-view'),
+            roomInput: document.getElementById('room-input'),
+            roomDisplay: document.getElementById('room-display'),
+            status: document.getElementById('status'),
+            logs: document.getElementById('logs'),
+            clickBtn: document.getElementById('click-btn')
+        };
+
+        function setStatus(msg) { ui.status.textContent = msg; }
+
+        function joinRoom() {
+            const room = ui.roomInput.value.trim().toLowerCase();
+            if (!room) return setStatus('请输入房间号');
+            if (!ABLY_KEY || ABLY_KEY === 'YOUR_ABLY_KEY') return setStatus('请先在代码里填入 Ably Key！');
+
+            setStatus('正在连接 Ably...');
+            ably = new Ably.Realtime({ key: ABLY_KEY });
+            channel = ably.channels.get(`room-${room}`);
+
+            // 监听对方消息
+            channel.subscribe('click-event', (msg) => {
+                const data = msg.data;
+                if (data.id !== myId) {
+                    addLog(`👤 对方点击了!`, 'remote');
+                    triggerEffect();
+                }
+            });
+
+            ably.connection.on('connected', () => {
+                ui.roomDisplay.textContent = room;
+                ui.loginView.classList.add('hidden');
+                ui.gameView.classList.remove('hidden');
+                addLog(`✅ 已加入: ${room} (ID: ${myId.substr(-4)})`, 'system');
+                setStatus('');
+            });
+
+            ably.connection.on('failed', (err) => {
+                setStatus('连接失败: ' + err.reason);
+            });
+        }
+
+        function sendClick() {
+            if (!channel) return;
+            // 发布消息到频道
+            channel.publish('click-event', { id: myId, time: Date.now() });
+            addLog(`🫵 你点击了`, 'local');
+        }
+
+        function addLog(text, type) {
+            const div = document.createElement('div');
+            div.className = `log-item ${type === 'system' ? 'text-blue-500' : (type === 'remote' ? 'text-pink-600 font-bold' : 'text-gray-800')}`;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+            ui.logs.prepend(div);
+        }
+
+        function triggerEffect() {
+            ui.clickBtn.classList.add('scale-90', 'bg-pink-300');
+            setTimeout(() => ui.clickBtn.classList.remove('scale-90', 'bg-pink-300'), 200);
+        }
+
+        function leaveRoom() {
+            if (ably) ably.close();
+            ui.gameView.classList.add('hidden');
+            ui.loginView.classList.remove('hidden');
+            ui.logs.innerHTML = '<div class="text-gray-400 text-center italic">等待互动...</div>';
+            setStatus('');
+        }
+    </script>
+</body>
+</html>
